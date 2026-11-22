@@ -67,5 +67,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Volt $GITHUB_REF_NAME" --generate-notes

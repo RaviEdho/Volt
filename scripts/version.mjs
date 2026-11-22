@@ -38,7 +38,7 @@ function run([command, argument, ...extra]) {
     if (!validVersion(argument)) throw new Error("Enter a stable X.Y.Z version (each part must be 0–65535).");
     npm.data.version = npmLock.data.version = lockedPackage.version = tauri.data.version = argument;
     npm.save(); npmLock.save(); tauri.save(); cargo.save(argument); cargoLock.save(argument);
-    console.log(`Set Volt to ${argument}. Commit the version files, then tag v${argument} to create a draft release.`);
+    console.log(`Set Volt to ${argument}. Commit the version files, then tag v${argument} to create a release.`);
     return;
   }
   const expected = npm.data.version;
