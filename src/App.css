@@ -1,0 +1,227 @@
+:root {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #eff4f9;
+  background: #11161d;
+}
+
+body {
+  margin: 0;
+}
+
+.dashboard {
+  max-width: 36rem;
+  margin-inline: auto;
+  padding: 2rem 1.5rem;
+}
+
+h1 {
+  margin: 0;
+  color: #a9f575;
+  font-size: 2.5rem;
+}
+
+p {
+  margin: 0.5rem 0 0;
+  color: #b5c0cd;
+}
+
+h2 {
+  margin: 1.75rem 0 0.75rem;
+  font-size: 1rem;
+}
+
+form {
+  display: grid;
+  gap: 0.875rem;
+  margin-top: 1rem;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  min-width: 0;
+}
+
+input,
+select,
+button {
+  border: 1px solid #465566;
+  border-radius: 0.4rem;
+  padding: 0.55rem 0.7rem;
+  background: #1a222c;
+  color: inherit;
+  font: inherit;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+}
+
+button[type="submit"]:not(:disabled) {
+  background: #a9f575;
+  color: #11161d;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.status,
+.note,
+details {
+  margin-top: 0.875rem;
+  font-size: 0.875rem;
+}
+
+.error {
+  color: #ffabab;
+  overflow-wrap: anywhere;
+}
+
+fieldset {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid #465566;
+  border-radius: 0.4rem;
+}
+
+.projects {
+  padding: 0;
+  list-style: none;
+}
+
+.projects li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #465566;
+  overflow-wrap: anywhere;
+}
+
+.projects p {
+  font-size: 0.875rem;
+}
+
+.sync-button {
+  margin-top: 0.5rem;
+}
+
+.environment-actions,
+.path-toggle {
+  margin-top: 0.75rem;
+}
+
+.path-toggle {
+  display: flex;
+  align-items: baseline;
+}
+
+.runtime-card {
+  margin-top: 0.875rem;
+  border: 1px solid #465566;
+  border-radius: 0.4rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.runtime-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.service-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.65rem;
+}
+
+.service-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.service-switch input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  width: 2.35rem;
+  height: 1.3rem;
+  border: 1px solid #78889a;
+  border-radius: 1rem;
+}
+
+.service-switch input::before {
+  content: "";
+  position: absolute;
+  inset: 0.15rem auto auto 0.17rem;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background: #eff4f9;
+}
+
+.service-switch input:checked {
+  background: #a9f575;
+  border-color: #a9f575;
+}
+
+.service-switch input:checked::before {
+  left: 1.18rem;
+  background: #11161d;
+}
+
+.service-switch input:disabled {
+  opacity: 0.5;
+}
+
+.service-switch input:not(:disabled) {
+  cursor: pointer;
+}
+
+@media (forced-colors: active) {
+  .service-switch input {
+    appearance: auto;
+  }
+
+  .service-switch input::before {
+    content: none;
+  }
+}
+
+.runtime-card summary {
+  cursor: pointer;
+}
+
+.data-path {
+  overflow-wrap: anywhere;
+}
+
+.password-field {
+  margin: 0.5rem 0;
+}
+
+pre {
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.75rem;
+  border-radius: 0.4rem;
+  background: #1a222c;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

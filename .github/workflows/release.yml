@@ -1,0 +1,71 @@
+name: Windows release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Validate tag and source versions
+        run: npm run version:check -- "$env:GITHUB_REF_NAME"
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run Rust tests
+        run: cargo +stable test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Test hosts-file updates against a fixture
+        shell: powershell
+        run: ./src-tauri/tests/sync_hosts.ps1
+      - name: Build Windows x64 NSIS installer
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis --ci -- --locked
+      - name: Stage installer and SHA-256 checksum
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $file = "Volt_${version}_x64-setup.exe"
+          $installer = "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/$file"
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          Copy-Item -LiteralPath $installer -Destination release-assets
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "release-assets/$file.sha256" -Value "$hash  $file" -Encoding ascii
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-release
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-release
+          path: release-assets
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "Volt $GITHUB_REF_NAME" --generate-notes
