@@ -315,6 +315,7 @@ mod desktop {
         // Create the configured window ourselves so its WebView2 profile follows the install directory.
         context.config_mut().app.windows[0].create = false;
         tauri::Builder::default()
+            .plugin(tauri_plugin_dialog::init())
             .manage(layout)
             .manage(EnvironmentLock::default())
             .setup(|app| {

@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import EnvironmentPanel, { type ManagedFolders } from "./EnvironmentPanel";
+import Icon from "./Icon";
 import MySqlPanel from "./MySqlPanel";
 import ServiceSwitch from "./ServiceSwitch";
 import "./App.css";
@@ -88,7 +89,7 @@ function App() {
   function saveProjects(next: Project[]) {
     localStorage.setItem(projectKey, JSON.stringify(next));
     setProjects(next);
-    setProjectMessage("Sync .test Domains to apply changes.");
+    setProjectMessage("Sync .test domains to apply changes.");
   }
 
   async function projectAction(action: "validate_projects" | "open_project" | "sync_project_hosts", slug?: string) {
@@ -128,18 +129,23 @@ function App() {
   const running = status?.running ?? false;
   const canEditProjects = desktop && !pending && !running;
   const apacheChanging = pending === "start_apache" || pending === "stop_apache";
+  const message = apacheChanging ? null : error ?? status?.error;
   const apacheLabel = pending === "start_apache" ? "Starting…"
     : pending === "stop_apache" ? "Stopping…"
-    : status?.ready ? "Running · 127.0.0.1:8080"
+    : status?.ready ? "Running"
     : running ? "PHP not ready"
-    : !apacheInstalled ? "Requires Apache and PHP."
-    : "Off";
-  const message = apacheChanging ? null : error ?? status?.error;
+    : message ? "Error"
+    : !desktop ? "Unavailable"
+    : !status ? "Checking…"
+    : managed.apache && !managed.php ? "Needs PHP"
+    : "Stopped";
+  const apacheTone = apacheChanging ? "busy" : status?.ready ? "ready" : running || message ? "warning" : "neutral";
 
   return (
     <main className="dashboard">
-      <header>
-        <h1>Volt</h1>
+      <header className="app-header">
+        <h1 className="brand"><span className="brand-mark"><Icon name="bolt" /></span>Volt</h1>
+        {!desktop && <span className="preview-label">Browser preview</span>}
       </header>
 
       <EnvironmentPanel
@@ -147,75 +153,86 @@ function App() {
         apacheRunning={running || apacheChanging}
         mysqlRunning={mysqlRunning}
         apacheControls={<>
-          <div className="service-actions">
-            <ServiceSwitch
-              label="Apache + PHP"
-              running={running}
-              disabled={!desktop || !status || !!pending || (!running && !apacheInstalled)}
-              onChange={enabled => void act(enabled ? "start_apache" : "stop_apache")}
-            />
-            <span className="status service-status" role="status">{apacheLabel}</span>
-            {status?.ready && <button type="button" disabled={!!pending} onClick={() => void act("open_demo")}>Open Demo</button>}
-          </div>
-          {message && <p className="error" role="alert">{message}</p>}
-          {status?.logs && <details open={!!status.error}>
+          <ServiceSwitch
+            label="Apache + PHP"
+            status={apacheLabel}
+            tone={apacheTone}
+            running={running}
+            disabled={!desktop || !status || !!pending || (!running && !apacheInstalled)}
+            onChange={enabled => void act(enabled ? "start_apache" : "stop_apache")}
+          />
+          {message && <p className="notice error" role="alert">{message}</p>}
+          {status?.logs && <details className="disclosure" open={!!status.error}>
             <summary>Apache logs</summary>
-            <pre>{status.logs}</pre>
+            <div className="disclosure-body"><pre>{status.logs}</pre></div>
           </details>}
         </>}
         mysqlControls={<MySqlPanel installed={!!managed.mysql} onRunningChange={setMysqlRunning} />}
+        apacheAction={status?.ready && <button className="quiet-button" type="button" disabled={!!pending} onClick={() => void act("open_demo")}>
+          Open demo <Icon name="external" />
+        </button>}
       />
       <section aria-labelledby="projects-heading">
         <div className="section-heading">
-          <h2 id="projects-heading">Projects</h2>
+          <div className="section-title">
+            <h2 id="projects-heading">Projects</h2>
+            <span className="section-count">{projects.length}<span className="sr-only"> {projects.length === 1 ? "project" : "projects"}</span></span>
+          </div>
           <button type="button" title="Requires Windows administrator approval" disabled={!desktop || !!pending} onClick={() => void projectAction("sync_project_hosts")}>
-            {pending === "sync_project_hosts" ? "Syncing…" : "Sync .test Domains"}
+            <Icon name="refresh" /> {pending === "sync_project_hosts" ? "Syncing…" : "Sync .test domains"}
           </button>
         </div>
-        {running && <p className="note">Stop Apache to edit projects.</p>}
-        {projects.length === 0 ? <p className="note">No projects yet.</p> : (
-          <ul className="projects">
-            {projects.map(project => (
-              <li key={project.slug}>
-                <div>
-                  <strong>{project.slug}.test:8080</strong>
-                  <p>{project.folder} · Web root: {project.webRoot}</p>
-                </div>
-                <div className="actions">
-                  <button type="button" aria-label={`Open ${project.slug}`} disabled={!!pending || !status?.ready} onClick={() => void projectAction("open_project", project.slug)}>Open</button>
-                  <button type="button" aria-label={`Remove ${project.slug}`} disabled={!canEditProjects} onClick={() => removeProject(project.slug)}>Remove</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        <details>
-          <summary>Add project</summary>
-          <form onSubmit={event => {
-            event.preventDefault();
-            if (canEditProjects) void projectAction("validate_projects");
-          }}>
-            <fieldset disabled={!canEditProjects}>
-              <legend className="sr-only">Project details</legend>
-              <label>
-                URL name
-                <input value={draft.slug} maxLength={50} onChange={event => setDraft({ ...draft, slug: event.target.value })} placeholder="my-project" required spellCheck={false} />
-              </label>
-              <label>
-                Absolute folder path
-                <input value={draft.folder} onChange={event => setDraft({ ...draft, folder: event.target.value })} placeholder="D:\Projects\My Project" required spellCheck={false} />
-              </label>
-              <label>
-                Web root
-                <input value={draft.webRoot} onChange={event => setDraft({ ...draft, webRoot: event.target.value })} required spellCheck={false} aria-describedby="project-root-hint" />
-                <span className="note" id="project-root-hint">Use <code>.</code> only if the whole folder should be served.</span>
-              </label>
-              <div className="actions"><button type="submit">Add Project</button></div>
-            </fieldset>
-          </form>
-        </details>
-        {projectMessage && <p className="note" role="status">{projectMessage}</p>}
-        {projectError && <p className="error" role="alert">{projectError}</p>}
+        {projectMessage && <p className="notice" role="status">{projectMessage}</p>}
+        {projectError && <p className="notice error" role="alert">{projectError}</p>}
+        <div className="panel">
+          {projects.length === 0 ? <p className="empty-state">No projects</p> : (
+            <ul className="projects">
+              {projects.map(project => (
+                <li key={project.slug}>
+                  <div className="project-info">
+                    <strong className="project-address">{project.slug}.test:8080</strong>
+                    <dl className="metadata">
+                      <div><dt>Folder</dt><dd><code>{project.folder}</code></dd></div>
+                      <div><dt>Web root</dt><dd><code>{project.webRoot}</code></dd></div>
+                    </dl>
+                  </div>
+                  <div className="actions project-actions">
+                    <button type="button" aria-label={`Open ${project.slug}`} disabled={!!pending || !status?.ready} onClick={() => void projectAction("open_project", project.slug)}>Open <Icon name="external" /></button>
+                    <button className="quiet-button" type="button" aria-label={`Remove ${project.slug}`} disabled={!canEditProjects} onClick={() => removeProject(project.slug)}>Remove</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="project-footer">
+            {running && <p className="note">Stop Apache to edit projects.</p>}
+            <details className="disclosure add-project">
+              <summary>Add project</summary>
+              <form className="disclosure-body" onSubmit={event => {
+                event.preventDefault();
+                if (canEditProjects) void projectAction("validate_projects");
+              }}>
+                <fieldset disabled={!canEditProjects}>
+                  <legend className="sr-only">Project details</legend>
+                  <label className="project-folder-field">
+                    Folder path
+                    <input className="mono" value={draft.folder} onChange={event => setDraft({ ...draft, folder: event.target.value })} placeholder="D:\Projects\My Project" required spellCheck={false} />
+                  </label>
+                  <label>
+                    Subdomain
+                    <input className="mono" value={draft.slug} maxLength={50} onChange={event => setDraft({ ...draft, slug: event.target.value })} placeholder="my-project" required spellCheck={false} />
+                  </label>
+                  <label>
+                    Web root
+                    <input className="mono" value={draft.webRoot} onChange={event => setDraft({ ...draft, webRoot: event.target.value })} required spellCheck={false} aria-describedby="project-root-hint" />
+                    <span className="note" id="project-root-hint">Use <code>.</code> only to serve the entire folder.</span>
+                  </label>
+                  <div className="actions"><button className="primary-button" type="submit">Add project</button></div>
+                </fieldset>
+              </form>
+            </details>
+          </div>
+        </div>
       </section>
     </main>
   );

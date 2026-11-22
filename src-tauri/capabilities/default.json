@@ -3,5 +3,6 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": ["main"],
-  "permissions": []
+  "platforms": ["windows"],
+  "permissions": ["dialog:allow-open"]
 }

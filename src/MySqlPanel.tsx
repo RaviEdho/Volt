@@ -67,46 +67,50 @@ export default function MySqlPanel({ installed, onRunningChange }: {
 
   const running = status?.running ?? false;
   useEffect(() => { onRunningChange(running || !!busy); }, [busy, running, onRunningChange]);
+  const message = busy ? null : error ?? status?.error;
   const label = busy === "start" ? "Starting…"
     : busy === "stop" ? "Stopping…"
-    : status?.ready ? "Running · 127.0.0.1:3307"
+    : status?.ready ? "Running"
     : running ? "Not ready"
-    : !installed ? "Select an installed version."
-    : "Off";
-  const message = busy ? null : error ?? status?.error;
+    : message ? "Error"
+    : !desktop ? "Unavailable"
+    : !status ? "Checking…"
+    : "Stopped";
+  const tone = busy ? "busy" : status?.ready ? "ready" : running || message ? "warning" : "neutral";
 
   return (
     <>
-      <div className="service-actions">
-        <ServiceSwitch
-          label="MySQL server"
-          running={running}
-          disabled={!desktop || !status || !!busy || (!running && !installed)}
-          onChange={enabled => void act(enabled ? "start" : "stop")}
-        />
-        <span className="status service-status" role="status">{label}</span>
-      </div>
-      {message && <p className="error" role="alert">{message}</p>}
+      <ServiceSwitch
+        label="MySQL server"
+        status={label}
+        tone={tone}
+        running={running}
+        disabled={!desktop || !status || !!busy || (!running && !installed)}
+        onChange={enabled => void act(enabled ? "start" : "stop")}
+      />
+      {message && <p className="notice error" role="alert">{message}</p>}
       {password && (
-        <details>
-          <summary>Show temporary MySQL root password</summary>
-          <p className="note data-path">For: {password.dataDir}</p>
-          <p className="note">Copy before closing Volt. Change it on first login.</p>
-          <label className="password-field">Temporary password
-            <input value={password.value} readOnly autoComplete="off" spellCheck={false} onFocus={event => event.target.select()} />
-          </label>
-          <button type="button" onClick={() => setPassword(null)}>Dismiss password</button>
+        <details className="disclosure credential">
+          <summary>Temporary root password</summary>
+          <div className="disclosure-body">
+            <label>Temporary password
+              <input className="mono" value={password.value} readOnly autoComplete="off" spellCheck={false} onFocus={event => event.target.select()} />
+            </label>
+            <dl className="metadata"><div><dt>Data folder</dt><dd><code>{password.dataDir}</code></dd></div></dl>
+            <p className="note">Copy before closing Volt. Change it on first login.</p>
+            <div className="actions"><button type="button" onClick={() => setPassword(null)}>Dismiss</button></div>
+          </div>
         </details>
       )}
       {installed && status?.dataDir && (
-        <details>
+        <details className="disclosure">
           <summary>Data folder</summary>
-          <p className="note data-path">{status.dataDir}</p>
+          <div className="disclosure-body"><code className="data-path">{status.dataDir}</code></div>
         </details>
       )}
-      {status?.logs && <details open={!!status.error}>
+      {status?.logs && <details className="disclosure" open={!!status.error}>
         <summary>MySQL logs</summary>
-        <pre>{status.logs}</pre>
+        <div className="disclosure-body"><pre>{status.logs}</pre></div>
       </details>}
     </>
   );

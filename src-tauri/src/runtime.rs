@@ -1,4 +1,4 @@
-use crate::local::{CREATE_NO_WINDOW, resolve_folder};
+use crate::local::CREATE_NO_WINDOW;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -288,7 +288,7 @@ pub fn install(
             Some(package)
         }
         (None, Some(_)) => None,
-        _ => return Err("Choose a version to download or a folder to import.".into()),
+        _ => return Err("Choose a version to download or a ZIP or folder to import.".into()),
     };
     let temp = tempfile::Builder::new()
         .prefix(".volt-install-")
@@ -296,33 +296,41 @@ pub fn install(
         .map_err(|error| format!("Could not create a runtime staging directory: {error}"))?;
     let staging = temp.path().join("runtime");
     fs::create_dir(&staging).map_err(|error| error.to_string())?;
-    let canonical_staging = dunce::canonicalize(&staging).map_err(|error| error.to_string())?;
-    if let Some(source) = source {
-        let source = resolve_folder(&source, runtime.name())?;
-        if canonical_staging.starts_with(&source)
-            || dunce::canonicalize(&parent).is_ok_and(|parent| parent.starts_with(&source))
-        {
-            return Err(
-                "Select the extracted runtime folder, not a parent of Volt’s managed directory."
-                    .into(),
-            );
+    let staging = dunce::canonicalize(staging).map_err(|error| error.to_string())?;
+    let staged_runtime = if let Some(source) = source {
+        let source = resolve_import(&source)?;
+        if source.is_dir() {
+            if staging.starts_with(&source)
+                || dunce::canonicalize(&parent).is_ok_and(|parent| parent.starts_with(&source))
+            {
+                return Err(
+                    "Select the extracted runtime folder, not a parent of Volt’s managed directory."
+                        .into(),
+                );
+            }
+            if !runtime.valid_layout(&source) {
+                return Err(format!(
+                    "Select the extracted {} folder containing {}.",
+                    runtime.name(),
+                    runtime.required_files().join(", ")
+                ));
+            }
+            copy_runtime(runtime, &source, &staging)
+                .map_err(|error| format!("Could not import the runtime: {error}"))?;
+            staging
+        } else {
+            stage_import_zip(runtime, &source, &staging)?
         }
-        if !runtime.valid_layout(&source) {
-            return Err(format!(
-                "Select the extracted {} folder containing {}.",
-                runtime.name(),
-                runtime.required_files().join(", ")
-            ));
+    } else {
+        if let Some(package) = package {
+            let archive = temp.path().join("download.zip");
+            download(package, &archive)?;
+            extract(&archive, &staging, package.archive_root)
+                .map_err(|error| format!("Could not extract the verified ZIP: {error}"))?;
         }
-        copy_runtime(runtime, &source, &staging)
-            .map_err(|error| format!("Could not import the runtime: {error}"))?;
-    } else if let Some(package) = package {
-        let archive = temp.path().join("download.zip");
-        download(package, &archive)?;
-        extract(&archive, &staging, package.archive_root)
-            .map_err(|error| format!("Could not extract the verified ZIP: {error}"))?;
-    }
-    let detected = runtime.detect_version(&canonical_staging)?;
+        staging
+    };
+    let detected = runtime.detect_version(&staged_runtime)?;
     if package.is_some_and(|package| package.version != detected) {
         return Err(format!(
             "The archive reports version {detected}, which doesn’t match the catalog."
@@ -333,9 +341,57 @@ pub fn install(
     if destination.is_dir() {
         fs::remove_dir(&destination).map_err(|error| error.to_string())?;
     }
-    fs::rename(staging, destination)
+    fs::rename(staged_runtime, destination)
         .map_err(|error| format!("Could not install the staged runtime: {error}"))?;
     Ok(detected)
+}
+
+fn resolve_import(source: &str) -> Result<PathBuf, String> {
+    let path = Path::new(source);
+    let is_zip = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"));
+    if !path.is_absolute() {
+        return Err("Select a local ZIP file or extracted runtime folder.".into());
+    }
+    match dunce::canonicalize(path) {
+        Ok(path) if path.is_dir() || (is_zip && path.is_file()) => Ok(path),
+        _ => Err(format!(
+            "Could not open a ZIP file or folder at {}.",
+            path.display()
+        )),
+    }
+}
+
+fn stage_import_zip(runtime: Runtime, source: &Path, staging: &Path) -> Result<PathBuf, String> {
+    extract(source, staging, "").map_err(|error| format!("Could not extract the ZIP: {error}"))?;
+    let folder = if runtime.valid_layout(staging) {
+        staging.to_path_buf()
+    } else {
+        // Vendor ZIPs may place the distribution one folder deep (e.g. Apache24).
+        let mut candidate = None;
+        for entry in fs::read_dir(staging).map_err(|error| error.to_string())? {
+            let path = entry.map_err(|error| error.to_string())?.path();
+            if path.is_dir() && runtime.valid_layout(&path) && candidate.replace(path).is_some() {
+                return Err(
+                    "This ZIP contains multiple matching runtimes. Import one at a time.".into(),
+                );
+            }
+        }
+        candidate.ok_or_else(|| {
+            format!(
+                "The ZIP does not contain a {} distribution with {}.",
+                runtime.name(),
+                runtime.required_files().join(", ")
+            )
+        })?
+    };
+    // Only move the distribution into place, never its existing MySQL config or databases.
+    if runtime == Runtime::Mysql {
+        remove_mysql_state(&folder)
+            .map_err(|error| format!("Could not exclude existing MySQL files: {error}"))?;
+    }
+    Ok(folder)
 }
 
 fn destination_available(destination: &Path) -> Result<(), String> {
@@ -359,20 +415,32 @@ fn is_link(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|meta| meta.file_attributes() & 0x400 != 0)
 }
 
+fn is_mysql_state(name: &std::ffi::OsStr) -> bool {
+    ["data", "my.ini", "my.cnf"]
+        .iter()
+        .any(|item| name.eq_ignore_ascii_case(item))
+}
+
+fn remove_mysql_state(folder: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(folder)? {
+        let entry = entry?;
+        if is_mysql_state(&entry.file_name()) {
+            if entry.file_type()?.is_dir() {
+                fs::remove_dir_all(entry.path())?;
+            } else {
+                fs::remove_file(entry.path())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn copy_runtime(runtime: Runtime, source: &Path, staging: &Path) -> io::Result<()> {
     let entries = walkdir::WalkDir::new(source)
         .min_depth(1)
         .into_iter()
         .filter_entry(|entry| {
-            if entry.depth() != 1 {
-                return true;
-            }
-            let name = entry.file_name().to_string_lossy();
-            // Import a MySQL distribution, never its existing configuration or databases.
-            !(matches!(runtime, Runtime::Mysql)
-                && ["data", "my.ini", "my.cnf"]
-                    .iter()
-                    .any(|item| name.eq_ignore_ascii_case(item)))
+            !(runtime == Runtime::Mysql && entry.depth() == 1 && is_mysql_state(entry.file_name()))
         });
     for entry in entries {
         let entry = entry?;
@@ -431,7 +499,7 @@ fn download(package: &Package, path: &Path) -> Result<(), String> {
         .map_err(|error| format!("Could not use Windows curl.exe: {error}"))?;
     if !result.status.success() {
         return Err(format!(
-            "Download failed: {}. You can also import an extracted ZIP.",
+            "Download failed: {}. You can also import a ZIP file or extracted folder.",
             String::from_utf8_lossy(&result.stderr).trim()
         ));
     }
@@ -470,6 +538,16 @@ fn extract(archive: &Path, staging: &Path, archive_root: &str) -> io::Result<()>
     let mut expanded_size = 0_u64;
     for index in 0..archive.len() {
         let mut item = archive.by_index(index)?;
+        // Reject absolute and traversing names before enclosed_name normalizes them.
+        if Path::new(item.name()?.as_ref())
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_) | Component::CurDir))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Unsafe ZIP entry path",
+            ));
+        }
         let path = item
             .enclosed_name()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Unsafe ZIP entry path"))?;
@@ -507,7 +585,13 @@ fn extract(archive: &Path, staging: &Path, archive_root: &str) -> io::Result<()>
         } else {
             fs::create_dir_all(destination.parent().expect("staging directory"))?;
             let mut file = File::create_new(destination)?;
-            io::copy(&mut item, &mut file)?;
+            let size = item.size();
+            if io::copy(&mut (&mut item).take(size + 1), &mut file)? != size {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Incorrect ZIP entry size",
+                ));
+            }
         }
     }
     Ok(())
@@ -533,6 +617,79 @@ mod tests {
         assert!(!staging.join("my.ini").exists());
         assert!(staging.join("bin/mysql.exe").is_file());
         assert!(destination_available(&staging).is_err());
+    }
+
+    fn write_zip(path: &Path, names: impl IntoIterator<Item = String>) {
+        use std::io::Write;
+        let mut archive = zip::ZipWriter::new(File::create(path).unwrap());
+        for name in names {
+            archive
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            archive.write_all(b"test").unwrap();
+        }
+        archive.finish().unwrap();
+    }
+
+    #[test]
+    fn imports_flat_and_wrapped_runtime_archives() {
+        for (runtime, prefix) in [(Runtime::Php, ""), (Runtime::Apache, "Apache24/")] {
+            let sandbox = tempfile::tempdir().unwrap();
+            let archive = sandbox.path().join("runtime.ZIP");
+            let staging = sandbox.path().join("staging");
+            fs::create_dir(&staging).unwrap();
+            write_zip(
+                &archive,
+                runtime
+                    .required_files()
+                    .iter()
+                    .map(|name| format!("{prefix}{name}")),
+            );
+            let source = resolve_import(archive.to_str().unwrap()).unwrap();
+            let folder = stage_import_zip(runtime, &source, &staging).unwrap();
+            assert_eq!(folder, staging.join(prefix));
+            assert!(runtime.valid_layout(&folder));
+        }
+    }
+
+    #[test]
+    fn excludes_mysql_data_and_configuration_from_zip_imports() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let archive = sandbox.path().join("runtime.zip");
+        let staging = sandbox.path().join("staging");
+        fs::create_dir(&staging).unwrap();
+        write_zip(
+            &archive,
+            [
+                "bin/mysql.exe",
+                "bin/mysqld.exe",
+                "Data/private",
+                "my.ini",
+                "MY.CNF",
+            ]
+            .map(|name| format!("mysql-8.4.13-winx64/{name}")),
+        );
+        let folder = stage_import_zip(Runtime::Mysql, &archive, &staging).unwrap();
+        assert!(Runtime::Mysql.valid_layout(&folder));
+        for name in ["Data", "my.ini", "MY.CNF"] {
+            assert!(!folder.join(name).exists());
+        }
+    }
+
+    #[test]
+    fn rejects_unsafe_or_incompatible_runtime_archives() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let archive = sandbox.path().join("runtime.zip");
+        let staging = sandbox.path().join("staging");
+        fs::create_dir(&staging).unwrap();
+        write_zip(&archive, ["../escaped.exe".into()]);
+        let error = stage_import_zip(Runtime::Php, &archive, &staging).unwrap_err();
+        assert!(error.contains("Unsafe ZIP entry path"));
+        assert!(!sandbox.path().join("escaped.exe").exists());
+
+        write_zip(&archive, ["README.txt".into()]);
+        let error = stage_import_zip(Runtime::Php, &archive, &staging).unwrap_err();
+        assert!(error.contains("does not contain a php distribution"));
     }
 
     #[test]
