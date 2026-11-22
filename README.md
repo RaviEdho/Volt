@@ -27,28 +27,13 @@ C:\Volt\
 
 Runtimes, databases, and settings live next to `volt.exe` even when you choose a different install folder. Updates and uninstall leave those folders in place. Data from the earlier AppData-based preview stays untouched. `npm run tauri dev` uses the project's ignored `.volt-dev` folder instead. Windows user PATH entries and `.test` hosts mappings are still stored by Windows.
 
-## Cut a GitHub release
-
-Regular pushes to `main` and pull requests run Windows CI. To release a new version, update the manifests and lockfiles together, commit them, then push an annotated tag matching that version:
-
-```sh
-npm run version:set -- 0.2.2
-npm run version:check
-
-git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
-git commit -m "Release 0.2.2"
-git push origin main
-git tag -a v0.2.2 -m "Volt 0.2.2"
-git push origin v0.2.2
-```
-
-The tag workflow checks the version, runs tests, and builds the Windows x64 NSIS installer. It attaches the installer and its SHA-256 checksum to a **draft** under GitHub Releases. Review the draft and click **Publish release** when ready. Installers are unsigned; this workflow does not enable in-app updates.
+Maintainers: see the [release guide](docs/RELEASING.md) for versioning and GitHub releases.
 
 ## Set up the environment
 
-Open **Environment** in Volt. Select a version and click **Download ZIP**, or use **Import Folder** to copy an extracted x64 distribution you already have. Volt reads the version from the imported binary and installs it into its own folder. Import only distributions you trust. MySQL imports skip the existing `data` folder and `my.ini`/`my.cnf` files. Downloads use pinned SHA-256 checksums, and Volt won’t overwrite a nonempty version folder. Older releases are provided for local compatibility testing.
+Open **Environment** in Volt. Expand **Install / import** for a runtime, then select a version and click **Download ZIP**, or use **Import Folder** to copy an extracted x64 distribution you already have. Volt reads the version from the imported binary and installs it into its own folder. Import only distributions you trust. MySQL imports skip the existing `data` folder and `my.ini`/`my.cnf` files. Downloads use pinned SHA-256 checksums, and Volt won’t overwrite a nonempty version folder. Older releases are provided for local compatibility testing.
 
-To install manually, click **Open Runtime Folder**, extract into a folder named for the exact binary version, then click **Rescan**:
+To install manually, click **Open Runtimes**, extract into a folder named for the exact binary version, then click **Rescan**:
 
 | Runtime folder under `C:\Volt\runtimes` (default) | Expected layout |
 | --- | --- |
@@ -58,11 +43,11 @@ To install manually, click **Open Runtime Folder**, extract into a folder named 
 
 Install the [Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe) if required by your binaries. The ZIP installer validates downloaded and imported executables before putting them in place. Rescan checks the folder layout of files you add manually. Service toggles use the chosen active versions. To reuse a distribution from Laragon, use **Import Folder**. Stop Apache before changing PHP or Apache versions, and stop MySQL before changing its version. Existing flat runtime folders appear as **Existing install (unversioned)** and remain in place.
 
-Turn on **Add active PHP, Apache, and MySQL versions to my Windows user PATH** to expose `php`, `httpd`, `mysql`, and the other bundled CLI tools. Volt switches its PATH entries to match the active versions without changing unrelated entries or the system PATH. Turning it off removes only entries Volt added. Reopen your terminal (and its parent app if needed), then try `where.exe php`, `where.exe httpd`, and `where.exe mysql`. Earlier PATH entries can still take precedence. Use Volt to start the services; commands run directly in your terminal do not use Volt’s generated service configuration.
+Turn on **Add active versions to user PATH** to expose `php`, `httpd`, `mysql`, and the other bundled CLI tools. Volt switches its PATH entries to match the active versions without changing unrelated entries or the system PATH. Turning it off removes only entries Volt added. Reopen your terminal (and its parent app if needed), then try `where.exe php`, `where.exe httpd`, and `where.exe mysql`. Earlier PATH entries can still take precedence. Use Volt to start the services; commands run directly in your terminal do not use Volt’s generated service configuration.
 
 ## Run the PHP demo
 
-Select an installed Apache 2.4 and Thread Safe PHP 8 version in **Environment**, then turn on **Enable Apache (with PHP)**. PHP runs inside Apache and has no separate switch. Once ready, click **Open Demo** to view the PHP version at `http://127.0.0.1:8080/`. Turn off Apache to take the demo offline. Closing Volt normally also stops its Apache process. If another app is already using port 8080, free the port before starting Volt.
+Select an installed Apache 2.4 and Thread Safe PHP 8 version in **Environment**, then turn on **Apache + PHP**. PHP runs inside Apache and has no separate switch. Once ready, click **Open Demo** to view the PHP version at `http://127.0.0.1:8080/`. Turn off Apache to take the demo offline. Closing Volt normally also stops its Apache process. If another app is already using port 8080, free the port before starting Volt.
 
 Volt generates a temporary Apache config, binds only to loopback, and does not change your existing Apache or PHP setup or register a Windows service. Startup errors and available Apache logs appear in the app.
 
@@ -70,14 +55,14 @@ Volt generates a temporary Apache config, binds only to loopback, and does not c
 
 1. With Apache stopped, add a project in Volt. Enter its full folder path and a relative web root. Use `public` for projects that have one, or `.` only if the **entire** folder is meant to be served.
 2. Click **Sync .test Domains** and approve the Windows UAC prompt. Volt maps registered names to `127.0.0.1` in the Windows hosts file. It leaves unrelated entries alone and refuses to overwrite a name already mapped to another address.
-3. Turn on **Enable Apache (with PHP)**, then click **Open** next to a project. For example, `blog` opens at `http://blog.test:8080`. All projects run together on the same Apache and PHP instance.
+3. Turn on **Apache + PHP**, then click **Open** next to a project. For example, `blog` opens at `http://blog.test:8080`. All projects run together on the same Apache and PHP instance.
 4. To remove a project, stop Apache, remove it from the list, then sync again to remove its Volt-managed hosts entry. Removing a project does not delete any of its files. Hosts entries persist across app restarts.
 
 Volt serves PHP and static files and routes missing paths to a web root’s `index.php` when present. It enables `pdo_mysql` when the PHP distribution includes `ext/php_pdo_mysql.dll`. It doesn’t read `.htaccess`, install project dependencies, or set up project databases automatically. Only register code you trust: it runs with your Windows user permissions.
 
 ## Run MySQL 8.4
 
-1. Select an installed MySQL 8.4 version and turn on **Enable MySQL**. The server listens only at `127.0.0.1:3307`. Each exact version has its own data directory under `C:\Volt\data\mysql-versions\<version>`. The existing unversioned MySQL install still uses `C:\Volt\data\mysql`. A different data directory starts with its own databases and accounts; switching back restores the previous version’s data. Volt doesn’t move or upgrade databases between versions, or use Laragon’s data or option files.
+1. Select an installed MySQL 8.4 version and turn on **MySQL server**. The server listens only at `127.0.0.1:3307`. Each exact version has its own data directory under `C:\Volt\data\mysql-versions\<version>`. The existing unversioned MySQL install still uses `C:\Volt\data\mysql`. A different data directory starts with its own databases and accounts; switching back restores the previous version’s data. Volt doesn’t move or upgrade databases between versions, or use Laragon’s data or option files.
 2. On the first start of a data directory, expand **Show temporary MySQL root password**. Copy it before closing Volt. The password is shown only after initialization; Volt doesn’t save it. MySQL requires it to be changed before the first administrative session can run other statements.
 3. In PowerShell, run the bundled MySQL client (replace the folder path). Enter the temporary password at the prompt, not as a command-line argument:
 
@@ -91,7 +76,7 @@ Volt serves PHP and static files and routes missing paths to a web root’s `ind
 
 If you close Volt before saving or changing the temporary password, see [MySQL’s root password reset instructions](https://dev.mysql.com/doc/refman/8.4/en/resetting-permissions.html) and use the Volt data directory shown in the app.
 
-Use a separate, database-scoped account for each project, not `root`. Use `127.0.0.1` as the application's database host and `3307` as the port. Turning off **Enable MySQL** or closing Volt normally stops its MySQL process without deleting data.
+Use a separate, database-scoped account for each project, not `root`. Use `127.0.0.1` as the application's database host and `3307` as the port. Turning off **MySQL server** or closing Volt normally stops its MySQL process without deleting data.
 
 ### Try the PHP counter
 

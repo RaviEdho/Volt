@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import ServiceSwitch from "./ServiceSwitch";
 
 type Status = {
   running: boolean;
@@ -66,34 +67,41 @@ export default function MySqlPanel({ installed, onRunningChange }: {
 
   const running = status?.running ?? false;
   useEffect(() => { onRunningChange(running || !!busy); }, [busy, running, onRunningChange]);
-  const label = busy === "start" ? "Starting MySQL (first start initializes the data folder)…"
-    : busy === "stop" ? "Stopping MySQL…"
-    : status?.ready ? "MySQL is ready at 127.0.0.1:3307"
-    : running ? "MySQL is running but not ready"
-    : !installed ? "Select an installed MySQL version to enable it."
-    : "MySQL stopped";
+  const label = busy === "start" ? "Starting…"
+    : busy === "stop" ? "Stopping…"
+    : status?.ready ? "Running · 127.0.0.1:3307"
+    : running ? "Not ready"
+    : !installed ? "Select an installed version."
+    : "Off";
   const message = busy ? null : error ?? status?.error;
 
   return (
     <>
       <div className="service-actions">
-        <label className="service-switch">
-          <input type="checkbox" role="switch" checked={running} disabled={!desktop || !status || !!busy || (!running && !installed)} onChange={event => void act(event.target.checked ? "start" : "stop")} />
-          Enable MySQL
-        </label>
+        <ServiceSwitch
+          label="MySQL server"
+          running={running}
+          disabled={!desktop || !status || !!busy || (!running && !installed)}
+          onChange={enabled => void act(enabled ? "start" : "stop")}
+        />
+        <span className="status service-status" role="status">{label}</span>
       </div>
-      <p className="status" role="status">{label}</p>
-      {installed && status?.dataDir && <p className="note data-path">Data: {status.dataDir}</p>}
       {message && <p className="error" role="alert">{message}</p>}
       {password && (
         <details>
           <summary>Show temporary MySQL root password</summary>
           <p className="note data-path">For: {password.dataDir}</p>
-          <p className="note">MySQL requires you to change this on first login. Copy it before closing Volt; Volt does not save it. See README.md for the commands.</p>
+          <p className="note">Copy before closing Volt. Change it on first login.</p>
           <label className="password-field">Temporary password
             <input value={password.value} readOnly autoComplete="off" spellCheck={false} onFocus={event => event.target.select()} />
           </label>
           <button type="button" onClick={() => setPassword(null)}>Dismiss password</button>
+        </details>
+      )}
+      {installed && status?.dataDir && (
+        <details>
+          <summary>Data folder</summary>
+          <p className="note data-path">{status.dataDir}</p>
         </details>
       )}
       {status?.logs && <details open={!!status.error}>

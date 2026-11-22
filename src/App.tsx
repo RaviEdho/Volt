@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import EnvironmentPanel, { type ManagedFolders } from "./EnvironmentPanel";
 import MySqlPanel from "./MySqlPanel";
+import ServiceSwitch from "./ServiceSwitch";
 import "./App.css";
 
 type ApacheStatus = {
@@ -87,7 +88,7 @@ function App() {
   function saveProjects(next: Project[]) {
     localStorage.setItem(projectKey, JSON.stringify(next));
     setProjects(next);
-    setProjectMessage("Project list updated. Sync .test Domains to update Windows.");
+    setProjectMessage("Sync .test Domains to apply changes.");
   }
 
   async function projectAction(action: "validate_projects" | "open_project" | "sync_project_hosts", slug?: string) {
@@ -104,7 +105,7 @@ function App() {
         setDraft(blankProject);
       } else if (action === "sync_project_hosts") {
         await invoke(action, { slugs: projects.map(project => project.slug) });
-        setProjectMessage("Windows hosts file synced.");
+        setProjectMessage("Domains synced.");
       } else {
         await invoke(action, { slug });
       }
@@ -127,19 +128,18 @@ function App() {
   const running = status?.running ?? false;
   const canEditProjects = desktop && !pending && !running;
   const apacheChanging = pending === "start_apache" || pending === "stop_apache";
-  const apacheLabel = pending === "start_apache" ? "Starting Apache with PHP…"
-    : pending === "stop_apache" ? "Stopping Apache…"
-    : status?.ready ? "Apache + PHP running at 127.0.0.1:8080"
-    : running ? "Apache is running, but PHP isn’t ready"
-    : !apacheInstalled ? "Select installed Apache and PHP versions to enable Apache."
-    : "Apache stopped";
+  const apacheLabel = pending === "start_apache" ? "Starting…"
+    : pending === "stop_apache" ? "Stopping…"
+    : status?.ready ? "Running · 127.0.0.1:8080"
+    : running ? "PHP not ready"
+    : !apacheInstalled ? "Requires Apache and PHP."
+    : "Off";
   const message = apacheChanging ? null : error ?? status?.error;
 
   return (
     <main className="dashboard">
       <header>
         <h1>Volt</h1>
-        <p>Local development for Windows</p>
       </header>
 
       <EnvironmentPanel
@@ -148,13 +148,15 @@ function App() {
         mysqlRunning={mysqlRunning}
         apacheControls={<>
           <div className="service-actions">
-            <label className="service-switch">
-              <input type="checkbox" role="switch" checked={running} disabled={!desktop || !status || !!pending || (!running && !apacheInstalled)} onChange={event => void act(event.target.checked ? "start_apache" : "stop_apache")} />
-              Enable Apache (with PHP)
-            </label>
-            <button type="button" disabled={!!pending || !status?.ready} onClick={() => void act("open_demo")}>Open Demo</button>
+            <ServiceSwitch
+              label="Apache + PHP"
+              running={running}
+              disabled={!desktop || !status || !!pending || (!running && !apacheInstalled)}
+              onChange={enabled => void act(enabled ? "start_apache" : "stop_apache")}
+            />
+            <span className="status service-status" role="status">{apacheLabel}</span>
+            {status?.ready && <button type="button" disabled={!!pending} onClick={() => void act("open_demo")}>Open Demo</button>}
           </div>
-          <p className="status" role="status">{apacheLabel}</p>
           {message && <p className="error" role="alert">{message}</p>}
           {status?.logs && <details open={!!status.error}>
             <summary>Apache logs</summary>
@@ -164,9 +166,14 @@ function App() {
         mysqlControls={<MySqlPanel installed={!!managed.mysql} onRunningChange={setMysqlRunning} />}
       />
       <section aria-labelledby="projects-heading">
-        <h2 id="projects-heading">Projects</h2>
-        <p className="note">All projects share the running PHP version. Stop Apache to add or remove projects.</p>
-        {projects.length === 0 ? <p className="note">No projects registered.</p> : (
+        <div className="section-heading">
+          <h2 id="projects-heading">Projects</h2>
+          <button type="button" title="Requires Windows administrator approval" disabled={!desktop || !!pending} onClick={() => void projectAction("sync_project_hosts")}>
+            {pending === "sync_project_hosts" ? "Syncing…" : "Sync .test Domains"}
+          </button>
+        </div>
+        {running && <p className="note">Stop Apache to edit projects.</p>}
+        {projects.length === 0 ? <p className="note">No projects yet.</p> : (
           <ul className="projects">
             {projects.map(project => (
               <li key={project.slug}>
@@ -182,31 +189,31 @@ function App() {
             ))}
           </ul>
         )}
-        <form onSubmit={event => {
-          event.preventDefault();
-          if (canEditProjects) void projectAction("validate_projects");
-        }}>
-          <fieldset disabled={!canEditProjects}>
-            <legend>Add a project</legend>
-            <label>
-              Project name (used in the URL)
-              <input value={draft.slug} maxLength={50} onChange={event => setDraft({ ...draft, slug: event.target.value })} placeholder="my-project" required spellCheck={false} />
-            </label>
-            <label>
-              Absolute project folder
-              <input value={draft.folder} onChange={event => setDraft({ ...draft, folder: event.target.value })} placeholder="D:\Projects\My Project" required spellCheck={false} />
-            </label>
-            <label>
-              Web root inside the project (use public or . for the whole folder)
-              <input value={draft.webRoot} onChange={event => setDraft({ ...draft, webRoot: event.target.value })} required spellCheck={false} />
-            </label>
-            <div className="actions"><button type="submit">Add Project</button></div>
-          </fieldset>
-        </form>
-        <p className="note">Sync once after adding or removing a project. Windows will ask for administrator approval.</p>
-        <button className="sync-button" type="button" disabled={!desktop || !!pending} onClick={() => void projectAction("sync_project_hosts")}>
-          {pending === "sync_project_hosts" ? "Syncing…" : "Sync .test Domains"}
-        </button>
+        <details>
+          <summary>Add project</summary>
+          <form onSubmit={event => {
+            event.preventDefault();
+            if (canEditProjects) void projectAction("validate_projects");
+          }}>
+            <fieldset disabled={!canEditProjects}>
+              <legend className="sr-only">Project details</legend>
+              <label>
+                URL name
+                <input value={draft.slug} maxLength={50} onChange={event => setDraft({ ...draft, slug: event.target.value })} placeholder="my-project" required spellCheck={false} />
+              </label>
+              <label>
+                Absolute folder path
+                <input value={draft.folder} onChange={event => setDraft({ ...draft, folder: event.target.value })} placeholder="D:\Projects\My Project" required spellCheck={false} />
+              </label>
+              <label>
+                Web root
+                <input value={draft.webRoot} onChange={event => setDraft({ ...draft, webRoot: event.target.value })} required spellCheck={false} aria-describedby="project-root-hint" />
+                <span className="note" id="project-root-hint">Use <code>.</code> only if the whole folder should be served.</span>
+              </label>
+              <div className="actions"><button type="submit">Add Project</button></div>
+            </fieldset>
+          </form>
+        </details>
         {projectMessage && <p className="note" role="status">{projectMessage}</p>}
         {projectError && <p className="error" role="alert">{projectError}</p>}
       </section>

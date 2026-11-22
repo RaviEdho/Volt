@@ -4,7 +4,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 export type RuntimeId = "php" | "apache" | "mysql";
 export type ManagedFolders = Partial<Record<RuntimeId, string>>;
 
-type Component = {
+type Runtime = {
   id: RuntimeId;
   folder: string;
   downloads: string[];
@@ -13,14 +13,85 @@ type Component = {
   activeFolder: string | null;
 };
 type Status = {
-  root: string;
-  runtimes: Component[];
+  runtimes: Runtime[];
   pathEnabled: boolean;
   pathError: string | null;
 };
+type RunAction = (message: string, action: () => Promise<Status | void>) => Promise<void>;
+
 const names: Record<RuntimeId, string> = { php: "PHP", apache: "Apache", mysql: "MySQL" };
 const desktop = isTauri();
-const label = (version: string) => version === "legacy" ? "Existing install (unversioned)" : version;
+const versionLabel = (version: string) => version === "legacy" ? "Existing install" : version;
+
+function RuntimeCard({ runtime, locked, busy, run, children }: {
+  runtime: Runtime;
+  locked: boolean;
+  busy: boolean;
+  run: RunAction;
+  children?: ReactNode;
+}) {
+  const [source, setSource] = useState("");
+  const [selectedDownload, setSelectedDownload] = useState("");
+  const name = names[runtime.id];
+  const available = runtime.downloads.filter(version => !runtime.versions.includes(version));
+  const download = available.includes(selectedDownload) ? selectedDownload : available[0];
+  const active = runtime.activeVersion;
+
+  return (
+    <section className="runtime-card" aria-labelledby={`runtime-${runtime.id}`}>
+      <div className="runtime-heading">
+        <h3 id={`runtime-${runtime.id}`}>{name}</h3>
+        <select
+          className="active-version"
+          aria-label={`Active ${name} version`}
+          aria-describedby={locked ? `runtime-${runtime.id}-locked` : undefined}
+          value={active ?? ""}
+          disabled={busy || locked || !runtime.versions.length}
+          onChange={event => {
+            const version = event.target.value;
+            void run(`Switching ${name}…`, () => invoke<Status>("select_runtime", { component: runtime.id, version }));
+          }}
+        >
+          {!active && <option value="">Not installed</option>}
+          {active && !runtime.versions.includes(active) && <option value={active} disabled>{versionLabel(active)} (missing)</option>}
+          {runtime.versions.map(version => <option key={version} value={version}>{versionLabel(version)}</option>)}
+        </select>
+      </div>
+      {locked && <span className="sr-only" id={`runtime-${runtime.id}-locked`}>Stop {runtime.id === "mysql" ? "MySQL" : "Apache"} to switch versions.</span>}
+      {children}
+      <details>
+        <summary>Install / import</summary>
+        {download && (
+          <div className="actions download-actions">
+            <select aria-label={`${name} version to download`} value={download} disabled={busy} onChange={event => setSelectedDownload(event.target.value)}>
+              {available.map(version => <option key={version}>{version}</option>)}
+            </select>
+            <button type="button" disabled={busy} onClick={() => void run(
+              `Downloading ${name} ${download}…`,
+              () => invoke<Status>("install_runtime", { component: runtime.id, version: download, source: null }),
+            )}>Download ZIP</button>
+          </div>
+        )}
+        <form onSubmit={event => {
+          event.preventDefault();
+          if (busy || !source.trim()) return;
+          void run(`Importing ${name}…`, async () => {
+            const next = await invoke<Status>("install_runtime", { component: runtime.id, version: null, source });
+            setSource("");
+            return next;
+          });
+        }}>
+          <label>
+            Extracted {name} folder
+            <input spellCheck={false} disabled={busy} value={source} onChange={event => setSource(event.target.value)} />
+          </label>
+          <div className="actions"><button type="submit" disabled={busy || !source.trim()}>Import Folder</button></div>
+        </form>
+        <p className="note data-path">{runtime.activeFolder ?? runtime.folder}</p>
+      </details>
+    </section>
+  );
+}
 
 export default function EnvironmentPanel({ onChange, apacheRunning, mysqlRunning, apacheControls, mysqlControls }: {
   onChange: (folders: ManagedFolders) => void;
@@ -30,8 +101,6 @@ export default function EnvironmentPanel({ onChange, apacheRunning, mysqlRunning
   mysqlControls: ReactNode;
 }) {
   const [status, setStatus] = useState<Status | null>(null);
-  const [sources, setSources] = useState<ManagedFolders>({});
-  const [downloads, setDownloads] = useState<ManagedFolders>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,7 +119,7 @@ export default function EnvironmentPanel({ onChange, apacheRunning, mysqlRunning
     return () => { active = false; };
   }, [update]);
 
-  async function run(message: string, action: () => Promise<Status | void>) {
+  const run: RunAction = async (message, action) => {
     setBusy(message);
     setError(null);
     try {
@@ -61,81 +130,42 @@ export default function EnvironmentPanel({ onChange, apacheRunning, mysqlRunning
     } finally {
       setBusy(null);
     }
-  }
+  };
 
   return (
     <section aria-labelledby="environment-heading">
-      <h2 id="environment-heading">Environment</h2>
-      <p className="note">Choose active versions below. Apache starts with the active PHP version; MySQL runs independently. Turn a service off before switching its version.</p>
-      {status && <p className="note data-path">Managed folder: {status.root}</p>}
-      <div className="actions environment-actions">
-        <button type="button" disabled={!desktop || !!busy} onClick={() => void run("Opening runtime folder…", () => invoke<void>("open_runtime_folder"))}>Open Runtime Folder</button>
-        <button type="button" disabled={!desktop || !!busy} onClick={() => void run("Scanning runtime folders…", () => invoke<Status>("environment_status"))}>Rescan</button>
+      <div className="section-heading">
+        <h2 id="environment-heading">Environment</h2>
+        <div className="actions">
+          <button type="button" disabled={!desktop || !!busy} onClick={() => void run("Opening runtimes…", () => invoke<void>("open_runtime_folder"))}>Open Runtimes</button>
+          <button type="button" disabled={!desktop || !!busy} onClick={() => void run("Scanning runtimes…", () => invoke<Status>("environment_status"))}>Rescan</button>
+        </div>
       </div>
-      {status && <label className="path-toggle">
-        <input type="checkbox" checked={status.pathEnabled} disabled={!!busy} onChange={event => {
-          const enabled = event.target.checked;
-          void run("Updating Windows user PATH…", () => invoke<Status>("set_environment_path", { enabled }));
-        }} />
-        Add active PHP, Apache, and MySQL versions to my Windows user PATH
-      </label>}
-      <p className="note">Reopen terminals after changing the active versions or PATH. Older builds are for local compatibility testing.</p>
       {busy && <p className="status" role="status">{busy}</p>}
       {(error ?? status?.pathError) && <p className="error" role="alert">{error ?? status?.pathError}</p>}
-      {status?.runtimes.map(runtime => {
-        const available = runtime.downloads.filter(version => !runtime.versions.includes(version));
-        const download = available.find(version => version === downloads[runtime.id]) ?? available[0] ?? "";
-        const missing = runtime.activeVersion && !runtime.versions.includes(runtime.activeVersion);
-        return (
-          <section key={runtime.id} className="runtime-card" aria-labelledby={`runtime-${runtime.id}`}>
-            <h3 id={`runtime-${runtime.id}`}>{names[runtime.id]} — {runtime.activeVersion ? `${label(runtime.activeVersion)}${missing ? " (missing)" : ""}` : "Not installed"}</h3>
-            {runtime.id === "apache" ? apacheControls : runtime.id === "mysql" ? mysqlControls : <p className="note">PHP runs inside Apache.</p>}
-            <details>
-            <summary>Manage {names[runtime.id]} versions</summary>
-            <p className="note data-path">{runtime.activeFolder ?? runtime.folder}</p>
-            <label className="environment-actions">
-              Active {names[runtime.id]} version
-              <select value={runtime.activeVersion ?? ""} disabled={!!busy || !runtime.versions.length || (runtime.id === "mysql" ? mysqlRunning : apacheRunning)} onChange={event => {
-                const version = event.target.value;
-                void run(`Switching ${names[runtime.id]}…`, () => invoke<Status>("select_runtime", { component: runtime.id, version }));
-              }}>
-                {!runtime.activeVersion && <option value="">No version installed</option>}
-                {missing && <option value={runtime.activeVersion!} disabled>{label(runtime.activeVersion!)} (missing)</option>}
-                {runtime.versions.map(version => <option key={version} value={version}>{label(version)}</option>)}
-              </select>
-            </label>
-            {runtime.id === "mysql" && <p className="note">Each version uses a separate data folder. Switch back to see the databases for an earlier version.</p>}
-            {available.length > 0 && <div className="actions environment-actions">
-              <label>
-                {names[runtime.id]} version to download
-                <select value={download} disabled={!!busy} onChange={event => setDownloads({ ...downloads, [runtime.id]: event.target.value })}>
-                  {available.map(version => <option key={version}>{version}</option>)}
-                </select>
-              </label>
-              <button type="button" disabled={!!busy} onClick={() => void run(
-                `Downloading and verifying ${names[runtime.id]} ${download}…`,
-                () => invoke<Status>("install_runtime", { component: runtime.id, version: download, source: null }),
-              )}>Download ZIP</button>
-            </div>}
-            <form onSubmit={event => {
-              event.preventDefault();
-              if (busy || !sources[runtime.id]?.trim()) return;
-              void run(`Importing ${names[runtime.id]}…`, async () => {
-                const next = await invoke<Status>("install_runtime", { component: runtime.id, version: null, source: sources[runtime.id] });
-                setSources(previous => ({ ...previous, [runtime.id]: "" }));
-                return next;
-              });
-            }}>
-              <label>
-                Or paste an extracted {names[runtime.id]} folder path
-                <input spellCheck={false} disabled={!!busy} value={sources[runtime.id] ?? ""} onChange={event => setSources({ ...sources, [runtime.id]: event.target.value })} />
-              </label>
-              <div className="actions"><button type="submit" disabled={!!busy || !sources[runtime.id]?.trim()}>Import Folder</button></div>
-            </form>
-            </details>
-          </section>
-        );
-      })}
+      {!desktop && <p className="note">Open Volt Desktop to manage runtimes.</p>}
+      {desktop && !status && !error && <p className="status" role="status">Loading runtimes…</p>}
+      {status?.runtimes.map(runtime => (
+        <RuntimeCard
+          key={runtime.id}
+          runtime={runtime}
+          locked={runtime.id === "mysql" ? mysqlRunning : apacheRunning}
+          busy={!!busy}
+          run={run}
+        >
+          {runtime.id === "apache" ? apacheControls : runtime.id === "mysql" ? mysqlControls : null}
+        </RuntimeCard>
+      ))}
+      {status && <div className="path-settings">
+        <label className="path-toggle">
+          <input type="checkbox" checked={status.pathEnabled} disabled={!!busy} onChange={event => {
+            const enabled = event.target.checked;
+            void run("Updating user PATH…", () => invoke<Status>("set_environment_path", { enabled }));
+          }} />
+          Add active versions to user PATH
+        </label>
+        <span className="note">Applies to new terminals.</span>
+      </div>}
     </section>
   );
 }

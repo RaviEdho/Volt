@@ -9,15 +9,15 @@ body {
 }
 
 .dashboard {
-  max-width: 36rem;
+  max-width: 40rem;
   margin-inline: auto;
-  padding: 2rem 1.5rem;
+  padding: 1.25rem;
 }
 
 h1 {
   margin: 0;
   color: #a9f575;
-  font-size: 2.5rem;
+  font-size: 2rem;
 }
 
 p {
@@ -25,9 +25,23 @@ p {
   color: #b5c0cd;
 }
 
-h2 {
-  margin: 1.75rem 0 0.75rem;
+.section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.section-heading h2 {
+  margin: 0;
   font-size: 1rem;
+}
+
+.section-heading button {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.875rem;
 }
 
 form {
@@ -76,8 +90,15 @@ button[type="submit"]:not(:disabled) {
 .status,
 .note,
 details {
-  margin-top: 0.875rem;
   font-size: 0.875rem;
+}
+
+main details {
+  margin-top: 0.5rem;
+}
+
+summary {
+  cursor: pointer;
 }
 
 .error {
@@ -114,25 +135,44 @@ fieldset {
   font-size: 0.875rem;
 }
 
-.sync-button {
-  margin-top: 0.5rem;
-}
-
-.environment-actions,
-.path-toggle {
-  margin-top: 0.75rem;
-}
-
+.path-settings,
 .path-toggle {
   display: flex;
-  align-items: baseline;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.path-settings {
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.65rem;
+}
+
+.path-settings .note {
+  color: #b5c0cd;
 }
 
 .runtime-card {
-  margin-top: 0.875rem;
+  margin-top: 0.5rem;
   border: 1px solid #465566;
   border-radius: 0.4rem;
   padding: 0.6rem 0.75rem;
+}
+
+.runtime-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.active-version {
+  width: min(100%, 11rem);
+  padding: 0.4rem 0.55rem;
+}
+
+.download-actions {
+  margin-top: 0.5rem;
 }
 
 .runtime-card h3 {
@@ -145,7 +185,16 @@ fieldset {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin-top: 0.65rem;
+  margin-top: 0.45rem;
+}
+
+.service-actions button {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.875rem;
+}
+
+.service-status {
+  color: #b5c0cd;
 }
 
 .service-switch {
@@ -204,8 +253,16 @@ fieldset {
   }
 }
 
-.runtime-card summary {
-  cursor: pointer;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .data-path {
