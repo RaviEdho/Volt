@@ -259,6 +259,18 @@ mod desktop {
     }
 
     #[tauri::command]
+    async fn install_php_composer(app: AppHandle) -> Result<EnvironmentStatus, String> {
+        environment_task(app, |_, root| {
+            let selection = runtime::load_selection(root)?;
+            let php = runtime::active_folder(root, Runtime::Php, &selection)
+                .ok_or("Select an installed PHP version first.")?;
+            runtime::install_composer(&php)?;
+            environment_info(root, None)
+        })
+        .await
+    }
+
+    #[tauri::command]
     async fn select_runtime(
         app: AppHandle,
         component: Runtime,
@@ -341,6 +353,7 @@ mod desktop {
                 mysql_status,
                 environment_status,
                 install_runtime,
+                install_php_composer,
                 select_runtime,
                 set_environment_path,
                 open_runtime_folder

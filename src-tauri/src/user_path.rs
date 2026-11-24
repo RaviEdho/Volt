@@ -1,4 +1,4 @@
-use crate::runtime::{self, LEGACY, RUNTIMES, Selection};
+use crate::runtime::{self, COMPOSER_DIR, LEGACY, RUNTIMES, Runtime, Selection};
 use sha2::{Digest, Sha256};
 use std::{fmt::Write, io, path::Path};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -73,10 +73,16 @@ fn sync_keys(
     if enabled {
         for id in RUNTIMES {
             if let Some(folder) = runtime::active_folder(root, id, selection) {
-                let path = id.binaries_dir(&folder);
-                let path = path.to_str().filter(|path| !path.contains([';', '"', '%']))
-                    .ok_or_else(|| io::Error::other("Volt’s runtime directory contains characters that cannot be safely added to PATH."))?;
-                desired.push(path.to_owned());
+                let composer = if id == Runtime::Php {
+                    runtime::composer_folder(&folder)
+                } else {
+                    None
+                };
+                for path in std::iter::once(id.binaries_dir(&folder)).chain(composer) {
+                    let path = path.to_str().filter(|path| !path.contains([';', '"', '%']))
+                        .ok_or_else(|| io::Error::other("Volt’s runtime directory contains characters that cannot be safely added to PATH."))?;
+                    desired.push(path.to_owned());
+                }
             }
         }
     }
@@ -133,7 +139,13 @@ fn managed_path(root: &Path, path: &Path) -> bool {
     RUNTIMES.into_iter().any(|id| {
         let base = root.join(id.name());
         let folder = match id {
-            runtime::Runtime::Php => path,
+            Runtime::Php if path.file_name().is_some_and(|name| name == COMPOSER_DIR) => {
+                let Some(parent) = path.parent() else {
+                    return false;
+                };
+                parent
+            }
+            Runtime::Php => path,
             _ if path.file_name().is_some_and(|name| name == "bin") => match path.parent() {
                 Some(folder) => folder,
                 None => return false,
@@ -231,6 +243,17 @@ mod tests {
             settings_key(Path::new(r"C:\Volt\runtimes")),
             settings_key(Path::new(r"D:\Volt\runtimes"))
         );
+    }
+
+    #[test]
+    fn composer_path_is_managed_only_inside_volt_php_installs() {
+        let root = Path::new(r"C:\Volt\runtimes");
+        for folder in [r"php\volt-composer", r"php\8.4.28\volt-composer"] {
+            assert!(managed_path(root, &root.join(folder)));
+        }
+        for folder in [r"php\custom\volt-composer", r"mysql\8.4.13\volt-composer"] {
+            assert!(!managed_path(root, &root.join(folder)));
+        }
     }
 
     #[test]

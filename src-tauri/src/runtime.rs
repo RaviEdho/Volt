@@ -11,7 +11,9 @@ use std::{
 
 #[path = "runtime_catalog.rs"]
 mod catalog;
-use catalog::Package;
+#[path = "composer.rs"]
+mod composer;
+pub use composer::{COMPOSER_DIR, composer_folder, install_composer};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -34,6 +36,7 @@ pub struct RuntimeStatus {
     versions: Vec<String>,
     active_version: Option<String>,
     active_folder: Option<PathBuf>,
+    composer_installed: bool,
 }
 
 impl Runtime {
@@ -245,17 +248,26 @@ pub fn active_folder(root: &Path, runtime: Runtime, selection: &Selection) -> Op
 pub fn status(root: &Path, selection: &Selection) -> Vec<RuntimeStatus> {
     RUNTIMES
         .into_iter()
-        .map(|id| RuntimeStatus {
-            id,
-            folder: root.join(id.name()),
-            downloads: id
-                .packages()
-                .iter()
-                .map(|package| package.version)
-                .collect(),
-            versions: versions(root, id),
-            active_version: active_version(root, id, selection),
-            active_folder: active_folder(root, id, selection),
+        .map(|id| {
+            let active_version = active_version(root, id, selection);
+            let active_folder = active_version
+                .as_deref()
+                .and_then(|version| id.installed_folder(root, version));
+            let composer_installed =
+                id == Runtime::Php && active_folder.as_deref().and_then(composer_folder).is_some();
+            RuntimeStatus {
+                id,
+                folder: root.join(id.name()),
+                downloads: id
+                    .packages()
+                    .iter()
+                    .map(|package| package.version)
+                    .collect(),
+                versions: versions(root, id),
+                active_version,
+                active_folder,
+                composer_installed,
+            }
         })
         .collect()
 }
@@ -324,7 +336,9 @@ pub fn install(
     } else {
         if let Some(package) = package {
             let archive = temp.path().join("download.zip");
-            download(package, &archive)?;
+            download(package.url, package.sha256, &archive).map_err(|error| {
+                format!("{error} You can also import a ZIP file or extracted folder.")
+            })?;
             extract(&archive, &staging, package.archive_root)
                 .map_err(|error| format!("Could not extract the verified ZIP: {error}"))?;
         }
@@ -338,6 +352,9 @@ pub fn install(
     }
     let destination = parent.join(&detected);
     destination_available(&destination)?;
+    if runtime == Runtime::Php {
+        install_composer(&staged_runtime)?;
+    }
     if destination.is_dir() {
         fs::remove_dir(&destination).map_err(|error| error.to_string())?;
     }
@@ -390,6 +407,22 @@ fn stage_import_zip(runtime: Runtime, source: &Path, staging: &Path) -> Result<P
     if runtime == Runtime::Mysql {
         remove_mysql_state(&folder)
             .map_err(|error| format!("Could not exclude existing MySQL files: {error}"))?;
+    } else if runtime == Runtime::Php {
+        let tools = folder.join(COMPOSER_DIR);
+        match fs::symlink_metadata(&tools) {
+            Ok(info) => {
+                if info.is_dir() {
+                    fs::remove_dir_all(&tools)
+                } else {
+                    fs::remove_file(&tools)
+                }
+                .map_err(|error| {
+                    format!("Could not exclude the imported Composer bundle: {error}")
+                })?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
     }
     Ok(folder)
 }
@@ -440,7 +473,12 @@ fn copy_runtime(runtime: Runtime, source: &Path, staging: &Path) -> io::Result<(
         .min_depth(1)
         .into_iter()
         .filter_entry(|entry| {
-            !(runtime == Runtime::Mysql && entry.depth() == 1 && is_mysql_state(entry.file_name()))
+            entry.depth() != 1
+                || match runtime {
+                    Runtime::Php => !entry.file_name().eq_ignore_ascii_case(COMPOSER_DIR),
+                    Runtime::Mysql => !is_mysql_state(entry.file_name()),
+                    Runtime::Apache => true,
+                }
         });
     for entry in entries {
         let entry = entry?;
@@ -467,7 +505,7 @@ fn copy_runtime(runtime: Runtime, source: &Path, staging: &Path) -> io::Result<(
     Ok(())
 }
 
-fn download(package: &Package, path: &Path) -> Result<(), String> {
+fn download(url: &str, sha256: &str, path: &Path) -> Result<(), String> {
     let curl = crate::local::system_directory()
         .map_err(|error| error.to_string())?
         .join("curl.exe");
@@ -493,17 +531,17 @@ fn download(package: &Package, path: &Path) -> Result<(), String> {
             "--output",
         ])
         .arg(path)
-        .arg(package.url)
+        .arg(url)
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|error| format!("Could not use Windows curl.exe: {error}"))?;
     if !result.status.success() {
         return Err(format!(
-            "Download failed: {}. You can also import a ZIP file or extracted folder.",
+            "Download failed: {}.",
             String::from_utf8_lossy(&result.stderr).trim()
         ));
     }
-    verify_hash(path, package.sha256)
+    verify_hash(path, sha256)
 }
 
 fn verify_hash(path: &Path, expected: &str) -> Result<(), String> {
@@ -527,7 +565,8 @@ fn verify_hash(path: &Path, expected: &str) -> Result<(), String> {
         });
     if actual != expected {
         return Err(
-            "The ZIP’s SHA-256 doesn’t match the pinned checksum. Volt did not install it.".into(),
+            "The download’s SHA-256 doesn’t match the pinned checksum. Volt did not install it."
+                .into(),
         );
     }
     Ok(())
@@ -653,6 +692,35 @@ mod tests {
     }
 
     #[test]
+    fn imports_php_without_copying_a_bundled_composer_launcher() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let archive = sandbox.path().join("php.zip");
+        let staging = sandbox.path().join("staging");
+        fs::create_dir(&staging).unwrap();
+        let composer = format!("{COMPOSER_DIR}/composer.bat");
+        write_zip(
+            &archive,
+            Runtime::Php
+                .required_files()
+                .iter()
+                .map(|name| (*name).to_owned())
+                .chain([composer.clone()]),
+        );
+        let folder = stage_import_zip(Runtime::Php, &archive, &staging).unwrap();
+        assert!(Runtime::Php.valid_layout(&folder));
+        assert!(!folder.join(COMPOSER_DIR).exists());
+
+        fs::create_dir(folder.join(COMPOSER_DIR)).unwrap();
+        fs::write(folder.join(&composer), "untrusted").unwrap();
+        let target = sandbox.path().join("copy");
+        fs::create_dir(&target).unwrap();
+        copy_runtime(Runtime::Php, &folder, &target).unwrap();
+        assert!(Runtime::Php.valid_layout(&target));
+        assert!(!target.join(COMPOSER_DIR).exists());
+        assert!(folder.join(composer).exists());
+    }
+
+    #[test]
     fn excludes_mysql_data_and_configuration_from_zip_imports() {
         let sandbox = tempfile::tempdir().unwrap();
         let archive = sandbox.path().join("runtime.zip");
@@ -729,6 +797,58 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "downloads the pinned PHP and Composer builds and requires the VC++ x64 runtime"]
+    fn downloads_php_with_composer_and_runs_it() {
+        let sandbox = tempfile::Builder::new()
+            .prefix("Volt test ")
+            .tempdir()
+            .unwrap();
+        let root = sandbox.path().join("runtimes");
+        let version = install(
+            &root,
+            Runtime::Php,
+            Some(Runtime::Php.packages()[0].version.into()),
+            None,
+        )
+        .unwrap();
+        let php = Runtime::Php.installed_folder(&root, &version).unwrap();
+        let tools = composer_folder(&php).unwrap();
+        let output = Command::new(tools.join("composer.bat"))
+            .args(["--version", "--no-ansi", "--no-plugins", "--no-scripts"])
+            .current_dir(sandbox.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success()
+                && (stdout.contains("Composer version 2.")
+                    || stderr.contains("Composer version 2.")),
+            "{output:?}"
+        );
+        assert!(
+            stderr.contains(&format!("PHP version {version}"))
+                || stdout.contains(&format!("PHP version {version}")),
+            "{stdout}\n{stderr}"
+        );
+        let output = Command::new(php.join("php.exe"))
+            .arg("-c")
+            .arg(tools.join("composer.ini"))
+            .arg("-d")
+            .arg(format!("extension_dir={}", php.join("ext").display()))
+            .args(["--ri", "openssl"])
+            .current_dir(sandbox.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
     #[ignore = "downloads the pinned vendor archives and requires the VC++ x64 runtime"]
     fn downloads_and_validates_pinned_stack() {
         let sandbox = tempfile::tempdir().unwrap();
@@ -755,7 +875,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(version, "8.3.37");
-        assert!(Runtime::Php.installed_folder(&imports, &version).is_some());
+        let php = Runtime::Php.installed_folder(&imports, &version).unwrap();
+        assert!(composer_folder(&php).is_some());
         assert_eq!(versions(&downloads, Runtime::Php), ["8.4.28", "8.3.37"]);
     }
 }

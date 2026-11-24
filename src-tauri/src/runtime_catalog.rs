@@ -7,6 +7,11 @@ pub struct Package {
     pub archive_root: &'static str,
 }
 
+// https://getcomposer.org/download/2.11.2/composer.phar.sha256
+pub const COMPOSER_URL: &str = "https://getcomposer.org/download/2.11.2/composer.phar";
+pub const COMPOSER_SHA256: &str =
+    "dd158c0afd41d15fac89e1b4e47b5d42911fe316c3687cd5edac98319b25d028";
+
 // PHP for Windows sha256sum.txt, Apache Lounge .zip.txt/WinGet, and the
 // Chocolatey MySQL recipes supply the pinned hashes. ZIPs come from the vendors.
 impl Runtime {

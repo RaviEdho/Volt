@@ -43,7 +43,13 @@ To install manually, click **Open runtimes**, extract into a folder named for th
 
 Install the [Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe) if required by your binaries. The ZIP installer validates downloaded and imported executables before putting them in place. Rescan checks the folder layout of files you add manually. Service toggles use the chosen active versions. To reuse a distribution from Laragon, use **Import folder…**. Stop Apache before changing PHP or Apache versions, and stop MySQL before changing its version. Existing flat runtime folders appear as **Existing install (unversioned)** and remain in place.
 
-Turn on **Add active versions to user PATH** to expose `php`, `httpd`, `mysql`, and the other bundled CLI tools. Volt switches its PATH entries to match the active versions without changing unrelated entries or the system PATH. Turning it off removes only entries Volt added. Reopen your terminal (and its parent app if needed), then try `where.exe php`, `where.exe httpd`, and `where.exe mysql`. Earlier PATH entries can still take precedence. Use Volt to start the services; commands run directly in your terminal do not use Volt’s generated service configuration.
+Turn on **Add active versions to user PATH** to expose `php`, `composer`, `httpd`, `mysql`, and the other bundled CLI tools. Volt switches its PATH entries to match the active versions without changing unrelated entries or the system PATH. Turning it off removes only entries Volt added. Reopen your terminal (and its parent app if needed), then try `where.exe php`, `where.exe httpd`, and `where.exe mysql`. Earlier PATH entries can still take precedence. Use Volt to start the services; commands run directly in your terminal do not use Volt’s generated service configuration.
+
+### Use Composer with PHP
+
+Volt downloads a pinned, SHA-256-verified Composer 2 automatically when you download or import PHP. PHP imports need internet access for this step; Volt stages a fresh Composer bundle rather than copying an existing `volt-composer` directory. For PHP already on disk (including versions you add manually), select it and click **Environment → PHP → Install / import → Install Composer for active PHP**.
+
+With user PATH management enabled, open a new terminal and run `composer --version`. Run Composer commands from your project folder. Without PATH management, run `volt-composer\composer.bat` by its full path inside the selected PHP install. The launcher uses that install’s `php.exe` and honors its `php.ini` if present; make sure OpenSSL is enabled in a custom `php.ini` so Composer can download over HTTPS. Volt doesn’t run `composer install` for your projects.
 
 ## Run the PHP demo
 
@@ -94,6 +100,6 @@ Copy `examples/mysql-counter/db.local.example.php` to `examples/mysql-counter/db
 
 For a browser-only UI preview, use `npm run dev`. To type-check and build the frontend, run `npm run build`.
 
-To test the actual pinned ZIP downloads, run `cargo test --manifest-path src-tauri/Cargo.toml downloads_and_validates_pinned_stack -- --ignored`. The test uses temporary folders and doesn’t change your PATH.
+To test the actual pinned downloads, run `cargo test --manifest-path src-tauri/Cargo.toml downloads_and_validates_pinned_stack -- --ignored`. To test just the PHP download and Composer launcher, run `cargo test --manifest-path src-tauri/Cargo.toml downloads_php_with_composer_and_runs_it -- --ignored`. These tests use temporary folders and don’t change your PATH.
 
 To run the PHP/MySQL smoke test, set `VOLT_TEST_MYSQL`, `VOLT_TEST_APACHE`, and `VOLT_TEST_PHP` to the respective binary folders, free ports 3307 and 8080, then run `cargo test --manifest-path src-tauri/Cargo.toml php_counter_survives_mysql_restart -- --ignored`. The test creates and removes its own data directory.

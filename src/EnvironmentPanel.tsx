@@ -13,6 +13,7 @@ type Runtime = {
   versions: string[];
   activeVersion: string | null;
   activeFolder: string | null;
+  composerInstalled: boolean;
 };
 type Status = {
   runtimes: Runtime[];
@@ -59,7 +60,7 @@ function RuntimeCard({ id, runtime, locked, busy, run, action, children }: {
         <span className="runtime-icon"><Icon name={icon} /></span>
         <div>
           <h3 id={`runtime-${id}`}>{name}</h3>
-          {endpoint ? <code className="endpoint">{endpoint}</code> : <span className="muted">Apache module</span>}
+          {endpoint ? <code className="endpoint">{endpoint}</code> : <span className="muted">{runtime?.composerInstalled ? "Apache module · Composer installed" : "Apache module"}</span>}
         </div>
       </div>
       <label className="runtime-version" title={locked ? `Stop ${id === "mysql" ? "MySQL" : "Apache"} to switch versions.` : undefined}>
@@ -102,6 +103,19 @@ function RuntimeCard({ id, runtime, locked, busy, run, action, children }: {
                 <button type="button" disabled={busy} onClick={() => void importRuntime(false)}>Import ZIP…</button>
                 <button type="button" disabled={busy} onClick={() => void importRuntime(true)}>Import folder…</button>
               </div>
+              {id === "php" && (
+                <>
+                  <p className="note">PHP installs include Composer. PHP ZIP and folder imports also download Composer.</p>
+                  {runtime.activeFolder && !runtime.composerInstalled && (
+                    <div className="actions">
+                      <button type="button" disabled={busy} onClick={() => void run(
+                        "Installing Composer…",
+                        () => invoke<Status>("install_php_composer"),
+                      )}>Install Composer for active PHP</button>
+                    </div>
+                  )}
+                </>
+              )}
               <p className="note">Only import binaries you trust. Volt runs them to check the version.</p>
               <dl className="metadata"><div>
                 <dt>{runtime.activeFolder ? "Install path" : "Runtime folder"}</dt>
